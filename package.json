@@ -4,8 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start":"node index",
-    "dev":"nodemon index",
+    "start": "node index",
+    "dev": "nodemon index",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "Joaquin",
@@ -14,5 +14,8 @@
     "axios": "^0.21.1",
     "cors": "^2.8.5",
     "express": "^4.17.1"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.7"
   }
 }
