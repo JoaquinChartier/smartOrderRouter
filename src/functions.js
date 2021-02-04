@@ -9,6 +9,23 @@ function hashString(hashIn){
     return hashOut
 }
 
+function getCurrentUnixTime(){
+    //Busco la hora actual the unix, seconds
+    let ts = Math.round((new Date()).getTime() / 1000);
+    return ts
+}
+
+function checkTimelock(age){
+    //Chequeo que el age sea mayor a un minuto
+    let currentTime = getCurrentUnixTime();
+    let diff = currentTime - age;
+    if (diff >= config.TIMELOCK){
+        return true
+    }else{
+        return false
+    }
+}
+
 function basicRequest(url, mode, data, config){
     //Request basico
     return new Promise((resolve, reject) => {
@@ -78,12 +95,21 @@ function getPrice(pair, typeOp){
         //Busca todos los pares de kraken
         let url = `https://api.kraken.com/0/public/Ticker?pair=${pair}`
         basicRequest(url,"GET").then((res) => {
+            let obj;
+            let response = res.data.result;
+            for (const key in response) {
+                if (Object.hasOwnProperty.call(response, key)) {
+                    obj = response[key];
+                    break
+                }
+            }
+
             if(typeOp == 'BUY'){
                 //BUY PRICE
-                resolve()
+                resolve(obj.a[0])
             }else{
                 //SELL PRICE
-                resolve(res.data.result);
+                resolve(obj.b[0]);
             }
         });
     })
@@ -97,34 +123,58 @@ function applyFeeNSpread(price){
     return price + fee + spread
 }
 
-function checkPair(assetA, assetB, typeOp){
+async function checkPair(assetA, assetB, typeOp){
     //Chequea si existe el par buscado, sino lo rutea
-    assetA = assetA.toLower();
-    assetB = assetB.toLower();
+    assetA = assetA.toLowerCase()
+    assetB = assetB.toLowerCase()
     let foundPair;
-    let assetsList = getPairs();
-
-    //Itera sobre todos los pares hasta encontrar un match
-    for (let i = 0; i < assetsList.length; i++) {
-        const element = assetsList[i];
-        const pairName = element.wsname.toLower();
-        if (pairName.contains(assetA) && pairName.contains(assetB)) {
-            foundPair = element;
-            break
+    let estimation;
+    let assetsList = await getPairs();
+    
+    //Itera sobre todos los pares hasta encontrar un match    
+    for (const key in assetsList) {
+        if (Object.hasOwnProperty.call(assetsList, key)) {
+            obj = assetsList[key];
+            const pairName = obj.wsname.toLowerCase();
+            //console.log(typeof(pairName))
+            if (pairName.includes(assetA) && pairName.includes(assetB)) {
+                foundPair = obj;
+                break
+            }
         }
     }
 
     if (foundPair){
         //Encontro el par directo
-        let estimation = {
+        estimation = {
             "typeOp": typeOp,
             "pair": foundPair.altname,
-            "price": 
+            "price": await getPrice(foundPair.altname, typeOp),
+            "timelock": getCurrentUnixTime() + config.TIMELOCK,
         }
     }else{
         //No lo encontro, hay que rutear
-
+        estimation = {
+            "routedObj":"obj"
+        }
     }
+
+    estimation = Object.assign(estimation, { "checksum": genChecksum(estimation) });
+    return estimation
+}
+
+function genChecksum(estimation){
+    //Genero el checksum a partir de los atributos y el secret
+    let str = '';
+    for (const key in estimation) {
+        if (Object.hasOwnProperty.call(estimation, key)) {
+            obj = estimation[key];
+            str += obj;
+        }
+    }
+    str += config.SECRET;
+    let hashed = hashString(str);
+    return hashed;
 }
 
 function checkHash(vars, hashIn){
@@ -141,15 +191,25 @@ function checkHash(vars, hashIn){
 }
 
 function estimate(pair, volume, typeOp){
-    //Estimacion
+    //Realiza la estimacion
     let col = pair.split("<>");
     let assetA = col[0];
     let assetB = col[1];
 
-    checkPair(assetA, assetB, typeOp);
+    let estimation = checkPair(assetA, assetB, typeOp);
+    return estimation;
+}
+
+function swap(returnedEstimation){
+    //Realiza el swap mediante el objeto estimacion
+    if(returnedEstimation.timelock > getCurrentUnixTime()){
+        //Dentro del timelock
+    }else{
+        //Fuera del timelock, EXPIRO
+    }
 }
 
 module.exports = {
-    getPairs: getPairs,
     estimate: estimate,
+    swap: swap,
 };

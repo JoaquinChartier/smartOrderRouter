@@ -1,6 +1,6 @@
 {
     "FEE":0,
     "SPREAD":2,
-    "TIMELOCK":10,
+    "TIMELOCK":60,
     "SECRET":"mIClaveSup3rSecr3ta"
 }
