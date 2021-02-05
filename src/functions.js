@@ -15,17 +15,6 @@ function getCurrentUnixTime(){
     return ts
 }
 
-function checkTimelock(age){
-    //Chequeo que el age sea mayor a un minuto
-    let currentTime = getCurrentUnixTime();
-    let diff = currentTime - age;
-    if (diff >= config.TIMELOCK){
-        return true
-    }else{
-        return false
-    }
-}
-
 function basicRequest(url, mode, data, config){
     //Request basico
     return new Promise((resolve, reject) => {
@@ -67,26 +56,28 @@ function getPairs(){
     })
 }
 
-function executeOperation(pair,type,orderType,volume){
+function executeOperation(pair,type,volume){
     //Ejecuta una orden directamente
-    return new Promise((resolve, reject) => {
-        let url = "https://api.kraken.com/0/private/AddOrder"
-        let config = {
-            headers: {
-                "API-Key": cred.APIKEY,
-                "API-Sign": value
-            }
-        }
-        let data = {
-            pair: pair,
-            type: type,
-            ordertype: orderType,
-            volume: volume
-        }
-        basicRequest(url, "POST", data, config).then((res) => {
-            resolve(res);
-        });
-    });
+    // return new Promise((resolve, reject) => {
+    //     let url = "https://api.kraken.com/0/private/AddOrder"
+    //     let config = {
+    //         headers: {
+    //             "API-Key": cred.APIKEY,
+    //             "API-Sign": value
+    //         }
+    //     }
+    //     let data = {
+    //         pair: pair,
+    //         type: type,
+    //         ordertype: orderType,
+    //         volume: volume
+    //     }
+    //     basicRequest(url, "POST", data, config).then((res) => {
+    //         resolve(res);
+    //     });
+    // });
+
+    return `Executed ${type} on ${pair}, volume: ${volume}`
 }
 
 function getPrice(pair, typeOp){
@@ -115,18 +106,68 @@ function getPrice(pair, typeOp){
     })
 }
 
-function applyFeeNSpread(price){
-    //Aplica el fee y spread al precio
-    price = Number(price);
-    let fee = ( price * config.FEE ) / 100;
-    let spread = ( price * config.SPREAD ) / 100;
-    return price + fee + spread
+function route(assetA, assetB, assetsList, typeOp){
+    //Rutea las ordenes que no pueden ser compradas de manera directa
+    assetA = assetA.toUpperCase()
+    assetB = assetB.toUpperCase()
+    typeOp = typeOp.toUpperCase()
+    let compatiblePairs = [];
+
+    //Guardo en una collection
+    // for (const key in assetsList) {
+    //     if (Object.hasOwnProperty.call(assetsList, key)) {
+    //         obj = assetsList[key];
+    //         const pairName = obj.wsname.toUpperCase();
+    //         if (pairName.includes(assetA) || pairName.includes(assetB)) {
+    //             compatiblePairs.push(obj);
+    //         }
+    //     }
+    // }
+
+    function searchCompPair(asset){
+        //Busco par compatible
+        for (const key in assetsList) {
+            if (Object.hasOwnProperty.call(assetsList, key)) {
+                obj = assetsList[key];
+                const pairName = obj.wsname.toUpperCase();
+                if (pairName.includes(asset)) {
+                    return pairName
+                }
+            }
+        }
+    }
+
+    function recursiveSearch(assetA, assetB, pairRouting){
+        if ((pairRouting[0][0].includes(assetA) || pairRouting[0][0].includes(assetB)) && 
+            (pairRouting[-1][0].includes(assetB) || pairRouting[-1][0].includes(assetA)) && assetA != assetB){
+                return pairRouting
+        }else{
+            //
+        }
+    }
+
+    if (typeOp == 'BUY'){
+
+    }else{
+
+    }
 }
 
-async function checkPair(assetA, assetB, typeOp){
+function applyFeeNSpread(price, typeOp){
+    //Aplica el fee y spread al precio
+    typeOp = typeOp.toUpperCase();
+    let configSpread = (typeOp == 'BUY') ? config.SPREAD : config.SPREAD * (-1);
+
+    price = Number(price);
+    let fee = ( price * config.FEE ) / 100;
+    let spread = ( price * configSpread ) / 100;
+    return price + spread + fee
+}
+
+async function checkPair(assetA, assetB, volume, typeOp){
     //Chequea si existe el par buscado, sino lo rutea
-    assetA = assetA.toLowerCase()
-    assetB = assetB.toLowerCase()
+    assetA = assetA.toUpperCase()
+    assetB = assetB.toUpperCase()
     let foundPair;
     let estimation;
     let assetsList = await getPairs();
@@ -135,8 +176,7 @@ async function checkPair(assetA, assetB, typeOp){
     for (const key in assetsList) {
         if (Object.hasOwnProperty.call(assetsList, key)) {
             obj = assetsList[key];
-            const pairName = obj.wsname.toLowerCase();
-            //console.log(typeof(pairName))
+            const pairName = obj.wsname.toUpperCase();
             if (pairName.includes(assetA) && pairName.includes(assetB)) {
                 foundPair = obj;
                 break
@@ -146,10 +186,15 @@ async function checkPair(assetA, assetB, typeOp){
 
     if (foundPair){
         //Encontro el par directo
+        let price = await getPrice(foundPair.altname, typeOp);
+        price = price * volume;
+        console.log(price)
         estimation = {
             "typeOp": typeOp,
             "pair": foundPair.altname,
-            "price": await getPrice(foundPair.altname, typeOp),
+            "price": applyFeeNSpread(price,typeOp),
+            "volume": volume,
+            "routed": false,
             "timelock": getCurrentUnixTime() + config.TIMELOCK,
         }
     }else{
@@ -196,7 +241,7 @@ function estimate(pair, volume, typeOp){
     let assetA = col[0];
     let assetB = col[1];
 
-    let estimation = checkPair(assetA, assetB, typeOp);
+    let estimation = checkPair(assetA, assetB, volume, typeOp);
     return estimation;
 }
 
@@ -204,8 +249,28 @@ function swap(returnedEstimation){
     //Realiza el swap mediante el objeto estimacion
     if(returnedEstimation.timelock > getCurrentUnixTime()){
         //Dentro del timelock
+        //Guardo todos los atributos del objeto
+        let str = '';
+        for (const key in returnedEstimation) {
+            if (Object.hasOwnProperty.call(returnedEstimation, key)) {
+                atr = returnedEstimation[key];
+                if (atr !== 'checksum') {
+                    str += atr;
+                }
+            }
+        }
+
+        if(checkHash(str, returnedEstimation.checksum)){
+            //El hash es correcto, ejecuto la compra
+            let ret = executeOperation(returnedEstimation.pair, returnedEstimation.typeOp, returnedEstimation.volume);
+            return ret
+        }else{
+            //El hash no es correcto
+            return `Hash incorrect, modified content`
+        }
     }else{
         //Fuera del timelock, EXPIRO
+        return `Order expired`
     }
 }
 
