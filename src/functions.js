@@ -106,49 +106,102 @@ function getPrice(pair, typeOp){
     })
 }
 
-function route(assetA, assetB, assetsList){
+function getTradesPerPair(pair){
+    //Busca la cantidad de trades en las ultimas 24 hs
+    return new Promise((resolve, reject) => {
+        //Busca todos los pares de kraken
+        let url = `https://api.kraken.com/0/public/Ticker?pair=${pair}`
+        basicRequest(url,"GET").then((res) => {
+            let obj;
+            let response = res.data.result;
+            for (const key in response) {
+                if (Object.hasOwnProperty.call(response, key)) {
+                    obj = response[key];
+                    break
+                }
+            }
+            //console.log(Number(obj.t[1]))
+            resolve(Number(obj.t[1]))
+        });
+    });
+}
+
+function route(assetToSell, assetToBuy, assetsList){
     //Rutea las ordenes que no pueden ser compradas de manera directa
-    assetA = assetA.toUpperCase()
-    assetB = assetB.toUpperCase()
-    //typeOp = typeOp.toUpperCase()
+    assetToSell = assetToSell.toUpperCase()
+    assetToBuy = assetToBuy.toUpperCase()
 
     function searchCompPair(asset){
+        let list = [];
         //Busco par compatible
         for (const key in assetsList) {
             if (Object.hasOwnProperty.call(assetsList, key)) {
                 obj = assetsList[key];
                 const pairName = obj.altname.toUpperCase();
                 if (pairName.includes(asset) && (obj.quote == asset || obj.base == asset)) {
-                    return obj
+                    list.push(obj);
                 }
             }
         }
+        return list
     }
 
-    function recursiveSearch(assetX, assetToSell, assetToBuy,  pairRouting, assetsListAux){
-        //console.log(pairRouting);
-        console.log(Object.keys(assetsListAux).length);
-        if (pairRouting.length !== 0 && pairRouting[0].includes(assetToSell) && pairRouting[-1].includes(assetToBuy) ){
-            return pairRouting
-        }else{
-            let asset;
-            if (pairRouting.length !== 0){
-                asset = assetToSell;
-            }else{
-                asset = assetX;
+    function checkQuote(obj){
+        let auxPairName = obj.altname;
+        auxPairName = auxPairName.replace(assetToSell,"");
+        auxPairName = auxPairName.replace(assetToBuy,"");
+        return auxPairName
+    }
+
+    let assetToSellList = searchCompPair(assetToSell)
+    let assetToBuyList = searchCompPair(assetToBuy)
+
+    let finalList = []
+    assetToSellList.forEach(element => {
+        let pair = checkQuote(element)
+        assetToBuyList.forEach(subElement => {
+            let subPair = checkQuote(subElement)
+
+            if (pair === subPair){
+                if (!finalList.includes([element.altname, subElement.altname])){
+                    finalList.push([element.altname, subElement.altname])
+                }
             }
+        });
+    });
+    
+    finalList.forEach(element => {
+        let avgTrades = [];
+        element.forEach(subElement => {
+            avgTrades.push(getTradesPerPair(subElement));
+        });
+        element.push(avgTrades);
+    });
 
-            let ret = searchCompPair(asset)
-            pairRouting.push(ret.altname);
-            let prop = ret.altname
-            delete assetsListAux[prop] //quitar de lista
-            ret = ret.altname.replace(asset,"");
-            recursiveSearch(ret, assetToSell, assetToBuy,  pairRouting, assetsListAux);
-        }
-    }
+    let promiseList = [];
+    finalList.forEach(element => {
+        promiseList.push(Promise.all(element[2]), element);
+    });
 
-    let list = recursiveSearch('', assetA, assetB, [], assetsList);
-    console.log('list',list)
+    return new Promise((resolve, reject) => {
+        Promise.all(promiseList).then((val) => {
+            let retList = [];
+            for (let index = 1; index < val.length; index+=2) {
+                const element = val[index];
+                let elem = val[index - 1]
+                let sum = ( elem[0] + elem[1] ) / 2;
+                retList.push([element[0], element[1], sum]);
+            };
+            
+            retList.sort(function(a, b) {
+                if (a[2] < b[2]) { return 1; }
+                if (a[2] > b[2]) { return -1; }
+                return 0;
+            });
+
+            resolve(retList);
+        });
+    });
 }
 
 function applyFeeNSpread(price, typeOp){
@@ -203,10 +256,23 @@ async function checkPair(assetA, assetB, volume, typeOp){
     }else{
         //No lo encontro, hay que rutear
 
-        route(assetA, assetB, assetsList);
+        let routed = await route(assetA, assetB, assetsList);
+        routed[0].pop();
+        console.log(routed[0]);
 
+        let price
+        if(typeOp == 'BUY'){
+            //acomodo segun buy y hago el ruoteo segun la ruta
+        }else{
+            
+        }
         estimation = {
-            "routedObj":"obj"
+            "typeOp": typeOp,
+            "pair": assetA+assetB,
+            "price": applyFeeNSpread(price,typeOp),
+            "volume": volume,
+            "routed": true,
+            "timelock": getCurrentUnixTime() + config.TIMELOCK,
         }
     }
 

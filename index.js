@@ -8,7 +8,7 @@ Server.use(Express.json());
 const port = process.env.port || 3000
 
 Server.post("/estimate", (request, response) => {
-    let pair = request.body.pair; // USDC<>BTC
+    let pair = request.body.pair; // USDC<>BTC // 
     let volume = request.body.volume; //10000
     let typeOp = request.body.typeOp; //BUY or SELL
     //Successful 200
