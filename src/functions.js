@@ -106,51 +106,49 @@ function getPrice(pair, typeOp){
     })
 }
 
-function route(assetA, assetB, assetsList, typeOp){
+function route(assetA, assetB, assetsList){
     //Rutea las ordenes que no pueden ser compradas de manera directa
     assetA = assetA.toUpperCase()
     assetB = assetB.toUpperCase()
-    typeOp = typeOp.toUpperCase()
-    let compatiblePairs = [];
-
-    //Guardo en una collection
-    // for (const key in assetsList) {
-    //     if (Object.hasOwnProperty.call(assetsList, key)) {
-    //         obj = assetsList[key];
-    //         const pairName = obj.wsname.toUpperCase();
-    //         if (pairName.includes(assetA) || pairName.includes(assetB)) {
-    //             compatiblePairs.push(obj);
-    //         }
-    //     }
-    // }
+    //typeOp = typeOp.toUpperCase()
 
     function searchCompPair(asset){
         //Busco par compatible
         for (const key in assetsList) {
             if (Object.hasOwnProperty.call(assetsList, key)) {
                 obj = assetsList[key];
-                const pairName = obj.wsname.toUpperCase();
-                if (pairName.includes(asset)) {
-                    return pairName
+                const pairName = obj.altname.toUpperCase();
+                if (pairName.includes(asset) && (obj.quote == asset || obj.base == asset)) {
+                    return obj
                 }
             }
         }
     }
 
-    function recursiveSearch(assetA, assetB, pairRouting){
-        if ((pairRouting[0][0].includes(assetA) || pairRouting[0][0].includes(assetB)) && 
-            (pairRouting[-1][0].includes(assetB) || pairRouting[-1][0].includes(assetA)) && assetA != assetB){
-                return pairRouting
+    function recursiveSearch(assetX, assetToSell, assetToBuy,  pairRouting, assetsListAux){
+        //console.log(pairRouting);
+        console.log(Object.keys(assetsListAux).length);
+        if (pairRouting.length !== 0 && pairRouting[0].includes(assetToSell) && pairRouting[-1].includes(assetToBuy) ){
+            return pairRouting
         }else{
-            //
+            let asset;
+            if (pairRouting.length !== 0){
+                asset = assetToSell;
+            }else{
+                asset = assetX;
+            }
+
+            let ret = searchCompPair(asset)
+            pairRouting.push(ret.altname);
+            let prop = ret.altname
+            delete assetsListAux[prop] //quitar de lista
+            ret = ret.altname.replace(asset,"");
+            recursiveSearch(ret, assetToSell, assetToBuy,  pairRouting, assetsListAux);
         }
     }
 
-    if (typeOp == 'BUY'){
-
-    }else{
-
-    }
+    let list = recursiveSearch('', assetA, assetB, [], assetsList);
+    console.log('list',list)
 }
 
 function applyFeeNSpread(price, typeOp){
@@ -175,11 +173,16 @@ async function checkPair(assetA, assetB, volume, typeOp){
     //Itera sobre todos los pares hasta encontrar un match    
     for (const key in assetsList) {
         if (Object.hasOwnProperty.call(assetsList, key)) {
-            obj = assetsList[key];
-            const pairName = obj.wsname.toUpperCase();
-            if (pairName.includes(assetA) && pairName.includes(assetB)) {
-                foundPair = obj;
-                break
+            try {
+                obj = assetsList[key];
+                //console.log(obj)
+                const pairName = obj.altname.toUpperCase();
+                if (pairName.includes(assetA) && pairName.includes(assetB)) {
+                    foundPair = obj;
+                    break
+                }
+            } catch (error) {
+                console.log('err',error)
             }
         }
     }
@@ -188,7 +191,7 @@ async function checkPair(assetA, assetB, volume, typeOp){
         //Encontro el par directo
         let price = await getPrice(foundPair.altname, typeOp);
         price = price * volume;
-        console.log(price)
+        //console.log(price)
         estimation = {
             "typeOp": typeOp,
             "pair": foundPair.altname,
@@ -199,6 +202,9 @@ async function checkPair(assetA, assetB, volume, typeOp){
         }
     }else{
         //No lo encontro, hay que rutear
+
+        route(assetA, assetB, assetsList);
+
         estimation = {
             "routedObj":"obj"
         }
