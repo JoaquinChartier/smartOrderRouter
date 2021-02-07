@@ -331,7 +331,7 @@ function checkHash(vars, hashIn){
 
 function estimate(pair, volume, typeOp){
     //Realiza la estimacion
-    let col = pair.split("<>");
+    let col = pair.split("/");
     let assetToSell;
     let assetToBuy;
 
