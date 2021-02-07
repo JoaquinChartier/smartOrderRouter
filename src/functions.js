@@ -56,7 +56,7 @@ function getPairs(){
     })
 }
 
-function executeOperation(pair,type,volume){
+function executeDirectOperation(pair,type,volume){
     //Ejecuta una orden directamente
     // return new Promise((resolve, reject) => {
     //     let url = "https://api.kraken.com/0/private/AddOrder"
@@ -76,8 +76,27 @@ function executeOperation(pair,type,volume){
     //         resolve(res);
     //     });
     // });
-
+    //console.log(`Executed ${type} on ${pair}, volume: ${volume}`)
     return `Executed ${type} on ${pair}, volume: ${volume}`
+}
+
+async function executeRoutedOperation(pair, volume){
+    let assetsList = await getPairs();
+
+    let col = pair.split("/");
+    assetToSell = col[0];
+    assetToBuy = col[1];
+
+    let routed = await route(assetToSell, assetToBuy, assetsList);
+
+    auxTypeOp = (routed[0].search(assetToSell) == 0) ? 'SELL' : 'BUY'; //Decido si es buy o sell segun su "posicion" en el par
+    executeDirectOperation(routed[0], auxTypeOp, volume);
+    let price = await getPrice(routed[0],auxTypeOp)
+    let intermediatePair = routed[0].replace(assetToSell, ""); //Extraigo el par intermedio
+    auxTypeOp = (routed[1].search(intermediatePair) == 0) ? 'SELL' : 'BUY';
+    volume = volume / price;
+    executeDirectOperation(routed[1], auxTypeOp, volume);
+    return `Executed routed operation`
 }
 
 function getPrice(pair, typeOp){
@@ -199,7 +218,8 @@ function route(assetToSell, assetToBuy, assetsList){
                 return 0;
             });
 
-            resolve(retList);
+            retList[0].pop(); //Quito el promedio de trades
+            resolve(retList[0]);
         });
     });
 }
@@ -215,10 +235,10 @@ function applyFeeNSpread(price, typeOp){
     return price + spread + fee
 }
 
-async function checkPair(assetA, assetB, volume, typeOp){
+async function checkPair(assetToSell, assetToBuy, volume, typeOp){
     //Chequea si existe el par buscado, sino lo rutea
-    assetA = assetA.toUpperCase()
-    assetB = assetB.toUpperCase()
+    assetToSell = assetToSell.toUpperCase()
+    assetToBuy = assetToBuy.toUpperCase()
     let foundPair;
     let estimation;
     let assetsList = await getPairs();
@@ -230,7 +250,7 @@ async function checkPair(assetA, assetB, volume, typeOp){
                 obj = assetsList[key];
                 //console.log(obj)
                 const pairName = obj.altname.toUpperCase();
-                if (pairName.includes(assetA) && pairName.includes(assetB)) {
+                if (pairName.includes(assetToSell) && pairName.includes(assetToBuy)) {
                     foundPair = obj;
                     break
                 }
@@ -247,7 +267,7 @@ async function checkPair(assetA, assetB, volume, typeOp){
         //console.log(price)
         estimation = {
             "typeOp": typeOp,
-            "pair": foundPair.altname,
+            "pair": foundPair.wsname,
             "price": applyFeeNSpread(price,typeOp),
             "volume": volume,
             "routed": false,
@@ -255,20 +275,20 @@ async function checkPair(assetA, assetB, volume, typeOp){
         }
     }else{
         //No lo encontro, hay que rutear
+        let routed = await route(assetToSell, assetToBuy, assetsList);
+        //console.log(routed);
+        
+        auxTypeOp = (routed[0].search(assetToSell) == 0) ? 'SELL' : 'BUY'; //Decido si es buy o sell segun su "posicion" en el par
+        let priceA = await getPrice(routed[0], auxTypeOp);
 
-        let routed = await route(assetA, assetB, assetsList);
-        routed[0].pop();
-        console.log(routed[0]);
+        let intermediatePair = routed[0].replace(assetToSell, ""); //Extraigo el par intermedio
+        auxTypeOp = (routed[1].search(intermediatePair) == 0) ? 'SELL' : 'BUY';
+        let priceB = await getPrice(routed[1], auxTypeOp);
 
-        let price
-        if(typeOp == 'BUY'){
-            //acomodo segun buy y hago el ruoteo segun la ruta
-        }else{
-            
-        }
+        let price = (priceA * priceB) * volume;
         estimation = {
             "typeOp": typeOp,
-            "pair": assetA+assetB,
+            "pair": assetToSell+'/'+assetToBuy,
             "price": applyFeeNSpread(price,typeOp),
             "volume": volume,
             "routed": true,
@@ -297,7 +317,9 @@ function genChecksum(estimation){
 function checkHash(vars, hashIn){
     //Chequeo que lo recibido sea legitimo mediante un hash
     let parmVars = vars.trim()+config.SECRET.trim();
+    //console.log('parms', parmVars)
     let hashOut = hashString(parmVars);
+    //console.log(hashIn,hashOut);
     if (hashIn === hashOut){
         console.log('Correct hash!');
         return true
@@ -310,14 +332,27 @@ function checkHash(vars, hashIn){
 function estimate(pair, volume, typeOp){
     //Realiza la estimacion
     let col = pair.split("<>");
-    let assetA = col[0];
-    let assetB = col[1];
+    let assetToSell;
+    let assetToBuy;
 
-    let estimation = checkPair(assetA, assetB, volume, typeOp);
+    // if(typeOp == 'BUY'){
+    //     //Si es BUY: assetToSell = assetB, assetToBuy = assetA
+    //     assetToSell = col[1];
+    //     assetToBuy = col[0];
+    // }else{
+    //     //Si es SELL: assetToSell = assetA, assetToBuy = assetB
+    //     assetToSell = col[0];
+    //     assetToBuy = col[1];
+    // }
+
+    assetToSell = col[0];
+    assetToBuy = col[1];
+
+    let estimation = checkPair(assetToSell, assetToBuy, volume, typeOp);
     return estimation;
 }
 
-function swap(returnedEstimation){
+async function swap(returnedEstimation){
     //Realiza el swap mediante el objeto estimacion
     if(returnedEstimation.timelock > getCurrentUnixTime()){
         //Dentro del timelock
@@ -325,8 +360,8 @@ function swap(returnedEstimation){
         let str = '';
         for (const key in returnedEstimation) {
             if (Object.hasOwnProperty.call(returnedEstimation, key)) {
-                atr = returnedEstimation[key];
-                if (atr !== 'checksum') {
+                if (key !== 'checksum') {
+                    atr = returnedEstimation[key];
                     str += atr;
                 }
             }
@@ -334,7 +369,12 @@ function swap(returnedEstimation){
 
         if(checkHash(str, returnedEstimation.checksum)){
             //El hash es correcto, ejecuto la compra
-            let ret = executeOperation(returnedEstimation.pair, returnedEstimation.typeOp, returnedEstimation.volume);
+            let ret;
+            if (returnedEstimation.routed){
+                ret = await executeRoutedOperation(returnedEstimation.pair,returnedEstimation.volume);
+            }else{
+                ret = executeDirectOperation(returnedEstimation.pair, returnedEstimation.typeOp, returnedEstimation.volume);
+            }
             return ret
         }else{
             //El hash no es correcto
